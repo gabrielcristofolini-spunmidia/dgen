@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demand Gen R01</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --series: #2a78d6; --series-soft: rgba(42,120,214,0.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --series: #3987e5; --series-soft: rgba(57,135,229,0.14);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --series: #3987e5; --series-soft: rgba(57,135,229,0.14);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 32px 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; position: relative; }
+h1 { font-size: 18px; font-weight: 600; margin: 0; }
+.sub { color: var(--ink-2); font-size: 13px; margin: 4px 0 16px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.tabs button {
+  font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--ink-2); border: 1px solid var(--border);
+}
+.tabs button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.big { font-size: 28px; font-weight: 600; }
+.big-note { font-size: 13px; color: var(--ink-2); margin-bottom: 8px; }
+#chart { width: 100%; height: 300px; }
+#chart svg { display: block; overflow: visible; }
+.tip {
+  position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+.tip b { font-weight: 600; }
+.tip span { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>Demand Gen · JN US CC R01</h1>
+    <p class="sub">Total por dia, 12/11 a 16/11/2026 (sem veiculação em 10/11 e 11/11)</p>
+    <div class="tabs" id="tabs" role="group" aria-label="Métrica"></div>
+    <div class="big" id="big"></div>
+    <div class="big-note" id="big-note"></div>
+    <div id="chart"></div>
+    <div class="tip" id="tip"></div>
+  </div>
+</main>
+<script>
+const CPA_ALVO = 7;
+// [dia, custo, conversões, impressões, cliques, campanhas ativas]
+const DADOS = [
+  ['12/11', 290.86, 27, 267, 42, 3],
+  ['13/11', 457.67, 71, 199, 96, 3],
+  ['14/11', 368.57, 76, 150, 83, 3],
+  ['15/11', 203.58, 22, 105, 32, 3],
+  ['16/11', 635.32, 93, 306, 119, 6]
+].map(([d, custo, conv, impr, cliq, ativas]) => ({
+  d, custo, conv, ativas,
+  cpa: custo / conv, ctr: cliq / impr, cpc: custo / cliq, tx: conv / cliq
+}));
+const SOMA = DADOS.reduce((a, s) => ({ custo: a.custo + s.custo, conv: a.conv + s.conv }), { custo: 0, conv: 0 });
+
+const brl = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const int = v => Math.round(v).toLocaleString('pt-BR');
+const pct = v => (v * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+
+const METRICAS = [
+  { key: 'custo', nome: 'Custo', fmt: brl, total: brl(SOMA.custo), nota: 'custo total no período' },
+  { key: 'conv', nome: 'Conversões', fmt: int, total: int(SOMA.conv), nota: 'conversões no período' },
+  { key: 'cpa', nome: 'Custo / conv.', fmt: brl, total: brl(SOMA.custo / SOMA.conv), nota: 'média do período · CPA desejado ' + brl(CPA_ALVO), ref: CPA_ALVO },
+  { key: 'ctr', nome: 'CTR', fmt: pct },
+  { key: 'cpc', nome: 'CPC médio', fmt: brl },
+  { key: 'tx', nome: 'Taxa de conv.', fmt: pct }
+];
+let atual = METRICAS[2];
+
+const tabs = document.getElementById('tabs');
+METRICAS.forEach(m => {
+  const b = document.createElement('button');
+  b.textContent = m.nome;
+  b.addEventListener('click', () => { atual = m; draw(); });
+  m.btn = b;
+  tabs.appendChild(b);
+});
+
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent.appendChild(e);
+  return e;
+}
+function niceMax(v) {
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  return [1, 1.2, 1.6, 2, 2.4, 4, 6, 8, 10].find(s => v / p <= s + 1e-9) * p;
+}
+
+function draw() {
+  const m = atual;
+  METRICAS.forEach(x => x.btn.setAttribute('aria-pressed', x === m));
+  const ultimo = DADOS[DADOS.length - 1];
+  document.getElementById('big').textContent = m.total || m.fmt(ultimo[m.key]);
+  document.getElementById('big-note').textContent = m.nota || 'em 16/11';
+
+  const box = document.getElementById('chart');
+  const tip = document.getElementById('tip');
+  box.innerHTML = '';
+  const W = box.clientWidth, H = box.clientHeight;
+  const g = { l: 60, r: 20, t: 16, b: 28 };
+  const iw = W - g.l - g.r, ih = H - g.t - g.b;
+  const vals = DADOS.map(s => s[m.key]);
+  const yMax = niceMax(Math.max(...vals, m.ref || 0) * 1.1);
+  const x = i => g.l + iw * i / (DADOS.length - 1);
+  const y = v => g.t + ih - v / yMax * ih;
+
+  const svg = el('svg', { width: W, height: H, role: 'img',
+    'aria-label': m.nome + ' por dia: ' + DADOS.map(s => s.d + ' ' + m.fmt(s[m.key])).join(', ') }, box);
+
+  for (let k = 0; k <= 4; k++) {
+    const v = yMax * k / 4;
+    el('line', { x1: g.l, x2: W - g.r, y1: y(v), y2: y(v), stroke: k ? 'var(--grid)' : 'var(--axis)' }, svg);
+    el('text', { x: g.l - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--muted)' }, svg)
+      .textContent = m.fmt(v).replace(',00', '');
+  }
+  DADOS.forEach((s, i) => {
+    el('text', { x: x(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 12, fill: 'var(--muted)' }, svg).textContent = s.d;
+  });
+  if (m.ref) {
+    el('line', { x1: g.l, x2: W - g.r, y1: y(m.ref), y2: y(m.ref), stroke: 'var(--ink-2)', 'stroke-dasharray': '4 4' }, svg);
+    el('text', { x: W - g.r, y: y(m.ref) - 6, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--ink-2)' }, svg)
+      .textContent = 'CPA desejado ' + brl(m.ref);
+  }
+
+  const pts = vals.map((v, i) => [x(i), y(v)]);
+  el('path', { d: `M${pts[0][0]},${y(0)} ` + pts.map(p => `L${p[0]},${p[1]}`).join(' ') + ` L${pts[pts.length - 1][0]},${y(0)} Z`, fill: 'var(--series-soft)' }, svg);
+  el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ',' + p[1]).join(' '), fill: 'none',
+    stroke: 'var(--series)', 'stroke-width': 2, 'stroke-linejoin': 'round' }, svg);
+  const cross = el('line', { y1: g.t, y2: g.t + ih, stroke: 'var(--axis)', opacity: 0 }, svg);
+  const dots = pts.map(p => el('circle', { cx: p[0], cy: p[1], r: 4, fill: 'var(--series)', stroke: 'var(--surface)', 'stroke-width': 2 }, svg));
+  el('text', { x: pts[pts.length - 1][0], y: pts[pts.length - 1][1] - 12, 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 600, fill: 'var(--ink)' }, svg)
+    .textContent = m.fmt(vals[vals.length - 1]);
+
+  const half = iw / (DADOS.length - 1) / 2;
+  DADOS.forEach((s, i) => {
+    const r = el('rect', { x: x(i) - half, y: 0, width: half * 2, height: H, fill: 'transparent' }, svg);
+    r.addEventListener('mouseenter', () => {
+      cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('opacity', 1);
+      dots.forEach((d, j) => d.setAttribute('r', j === i ? 6 : 4));
+      tip.innerHTML = `<b>${s.d}</b> · ${m.fmt(s[m.key])}<br><span>${brl(s.custo)} · ${s.conv} conv · ${s.ativas} campanhas</span>`;
+      tip.style.opacity = 1;
+      let left = box.offsetLeft + x(i) + 14;
+      if (left + tip.offsetWidth > box.offsetLeft + W) left = box.offsetLeft + x(i) - tip.offsetWidth - 14;
+      tip.style.left = left + 'px';
+      tip.style.top = (box.offsetTop + Math.max(0, pts[i][1] - 50)) + 'px';
+    });
+  });
+  svg.addEventListener('mouseleave', () => {
+    cross.setAttribute('opacity', 0);
+    dots.forEach(d => d.setAttribute('r', 4));
+    tip.style.opacity = 0;
+  });
+}
+draw();
+let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(draw, 120); });
+</script>
+</body>
+</html>
